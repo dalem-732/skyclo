@@ -1,0 +1,263 @@
+ ▐▛███▜▌   Claude Code v2.1.76
+▝▜█████▛▘  Opus 4.6 · Claude Max
+  ▘▘ ▝▝    ~/Downloads/Skyclo task test/candidate-B
+
+❯ @README.md сначала план
+
+● Сначала прочитаю задание и посмотрю структуру проекта, чтобы план опирался на реальные требования и данные.
+
+● Read(README.md)
+  ⎿  Read 48 lines
+
+● Search(pattern: "**/*")
+  ⎿  Found 5 files (ctrl+o to expand)
+
+● Read(data/FORMAT.md)
+  ⎿  Read 39 lines
+
+● Read(data/contracts.csv)
+  ⎿  Read 4 lines
+
+● Read(data/works.csv)
+  ⎿  Read 11 lines
+
+● Read(data/payments.csv)
+  ⎿  Read 10 lines
+
+● Данные небольшие, но отчёт на дату упирается в несколько развилок: статус на дату выгрузки, авансы без работы, очередь и возвраты. Ниже — модель расчёта и контрольные цифры на 10.11.2026.
+
+  ## Что делаем
+
+  Скрипт `report.py`: читает `data/*.csv`, режет состояние на выбранную дату и пишет два файла, `out/works-<дата>.csv` и `out/contracts-<дата>.csv`. Расчёт вынесу в функции, чтобы тесты вызывали его напрямую, без CLI. Деньги только через `Decimal`, без float. Выходные CSV — UTF-8 с BOM, как в задании.
+
+  ## Срез на дату
+
+  Колонке `status` не верю: это состояние на момент выгрузки. У W-23 уже `accepted`, хотя приёмка только 11.11. На дату отчёта:
+
+  - работа отменена, если `cancelled_at` не позже даты, иначе принята, если есть `completed_at` не позже даты, иначе запланирована;
+  - платёж ещё не существует, если `created_at` позже даты;
+  - в очереди: статус `queued` либо нет `paid_at` (или он позже даты);
+  - возврат не входит в выплаченное, если `refunded_at` не позже даты.
+
+  На 10.11.2026 это значит: упаковка W-23 ещё запланирована, платёж P-8 (20 000 от 12.11) в отчёт не входит, P-2 (возврат 10.09) в выплаченном не числится, P-4 (150 000) остаётся в очереди.
+
+  ## Как разносить деньги
+
+  - Платёж с указанной работой садится на неё целиком, даже если выходит за цену.
+  - Аванс без работы — в пул договора. Сначала закрываю принятые работы по дате приёмки, остаток — запланированные по идентификатору. Отменённые в пул не встают и в «к оплате» не входят.
+  - «Выплачено» по договору — деньги, которые к дате уже ушли и не возвращены (разнесённые по работам плюс неразнесённый остаток пула). Очередь отдельно, в выплаченное не входит.
+  - «К оплате» — сумма работ без отменённых. «Осталось» = «к оплате» − «выплачено».
+
+  ## Контрольные цифры на 10.11.2026
+
+  По D-1 пул аванса 300 000 (P-1 и P-3) плюс прямой платёж 15 000 на W-14. Принятые закрываются полностью: W-11 и W-12 по 100 000 из аванса, W-14 — 15 000 напрямую и 85 000 из аванса. Остаток пула 15 000 уходит на ближайшую плановую — зимнюю съёмку W-15. W-16 пока ноль, W-13 отменена и в долг не входит. Итого по студии: к оплате 500 000, выплачено 315 000, остаток 185 000, в очереди 150 000.
+
+  По D-2 пул 75 000 (P-6 и P-7). W-21 и W-22 закрываются, на упаковку W-23 садится 25 000, остаток 15 000. Выплачено 75 000.
+
+  ## Документы и проверки
+
+  - Тесты: правила разнесения (отмена, чужая работа, платёж сверх цены, принятые раньше плановых), срез на 10.11, очередь и возврат, другая дата (после 12.11), запись CSV с BOM.
+  - `DECISIONS.md` — развилки и что получилось бы при другом выборе.
+  - `записка-бухгалтеру.md` — колонки простым языком и на что смотреть в цифрах.
+
+  Если план в порядке, могу сразу писать скрипт.
+
+❯ ок, делай
+
+● Начинаю со скрипта отчёта: загрузка CSV, срез на дату и разнесение аванса.
+
+● Write(report.py)
+  ⎿  Wrote 474 lines to report.py
+     #!/usr/bin/env python3
+     """Отчёт по авансам: цена, выплачено и остаток на выбранную дату."""
+     
+     from __future__ import annotations
+     
+     import argparse
+     import csv
+     import sys
+     from dataclasses import dataclass, field
+     from datetime import date, datetime
+     … +464 lines (ctrl+o to expand)
+
+● Пишу тесты так, чтобы они вызывали расчёт напрямую и покрывали развилки, не только выгрузку на 10.11.
+
+● Write(tests/test_report.py)
+  ⎿  Wrote 239 lines to tests/test_report.py
+     import csv
+     import sys
+     import tempfile
+     import unittest
+     from datetime import date
+     from decimal import Decimal
+     from pathlib import Path
+     
+     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+     
+     … +229 lines (ctrl+o to expand)
+
+● Bash(python -m unittest tests.test_report -v)
+  ⎿  Exit code 127
+     python: command not found
+
+● На этой машине нет команды `python`, запускаю через python3.
+
+● Bash(python3 -m unittest tests.test_report -v)
+  ⎿  test_cancelled_work_does_not_take_the_pool (tests.test_report.AllocationRules.test_cancelled_work_does_not_take_the_pool) ... ok
+     test_direct_payment_above_price_stays_on_the_work (tests.test_report.AllocationRules.test_direct_payment_above_price_stays_on_the_work) ... ok
+     test_done_works_are_closed_before_planned (tests.test_report.AllocationRules.test_done_works_are_closed_before_planned) ... ok
+     test_foreign_work_is_not_allocated_to_others (tests.test_report.AllocationRules.test_foreign_work_is_not_allocated_to_others) ... ok
+     test_price_mismatch_warns_and_uses_work_prices (tests.test_report.AllocationRules.test_price_mismatch_warns_and_uses_work_prices) ... ok
+     test_allocation (tests.test_report.AsOfNovember10.test_allocation) ... ok
+     test_contract_totals (tests.test_report.AsOfNovember10.test_contract_totals) ... ok
+     test_invariants_and_decimal (tests.test_report.AsOfNovember10.test_invariants_and_decimal) ... ok
+     test_queued_is_separate (tests.test_report.AsOfNovember10.test_queued_is_separate) ... ok
+     test_refund_is_not_paid (tests.test_report.AsOfNovember10.test_refund_is_not_paid) ... ok
+     test_w23_is_planned_and_p8_is_excluded (tests.test_report.AsOfNovember10.test_w23_is_planned_and_p8_is_excluded) ... ok
+     test_files_roundtrip (tests.test_report.CsvOutput.test_files_roundtrip) ... ok
+     test_later_payment_included_after_its_date (tests.test_report.OtherDates.test_later_payment_included_after_its_date) ... ok
+     test_refund_still_counts_before_return (tests.test_report.OtherDates.test_refund_still_counts_before_return) ... ok
+     ----------------------------------------------------------------------
+     Ran 14 tests in 0.018s
+     OK
+
+● Bash(python3 --version && python3 report.py --data data --date 2026-11-10 --out out && echo "--- works ---" && cat out/works-2026-11-10.csv && echo "--- contracts ---" && cat out/contracts-2026-11-10.csv)
+  ⎿  Python 3.13.5
+     out/works-2026-11-10.csv
+     out/contracts-2026-11-10.csv
+     --- works ---
+     ﻿Договор,Подрядчик,Работа,Название,Статус на дату,Цена,К оплате,Выплачено,Осталось,Из них по работе,Из них из аванса
+     D-1,Студия «Свет»,W-11,Съёмка: весенняя коллекция,принята,100000.00,100000.00,100000.00,0.00,0.00,100000.00
+     D-1,Студия «Свет»,W-12,Съёмка: лето,принята,100000.00,100000.00,100000.00,0.00,0.00,100000.00
+     D-1,Студия «Свет»,W-13,Съёмка: аксессуары,отменена,100000.00,0.00,0.00,0.00,0.00,0.00
+     D-1,Студия «Свет»,W-14,Съёмка: осень,принята,100000.00,100000.00,100000.00,0.00,15000.00,85000.00
+     D-1,Студия «Свет»,W-15,Съёмка: зима,запланирована,100000.00,100000.00,15000.00,85000.00,0.00,15000.00
+     D-1,Студия «Свет»,W-16,Съёмка: новогодняя,запланирована,100000.00,100000.00,0.00,100000.00,0.00,0.00
+     D-2,"Иван Петров, дизайнер",W-21,Логотип,принята,20000.00,20000.00,20000.00,0.00,0.00,20000.00
+     D-2,"Иван Петров, дизайнер",W-22,Фирменный стиль,принята,30000.00,30000.00,30000.00,0.00,0.00,30000.00
+     D-2,"Иван Петров, дизайнер",W-23,Упаковка,запланирована,40000.00,40000.00,25000.00,15000.00,0.00,25000.00
+     --- contracts ---
+     ﻿Договор,Подрядчик,Сумма по подписи,К оплате,Выплачено,Осталось,В очереди,Аванс не разнесён
+     D-1,Студия «Свет»,600000.00,500000.00,315000.00,185000.00,150000.00,0.00
+     D-2,"Иван Петров, дизайнер",90000.00,90000.00,75000.00,15000.00,0.00,0.00
+
+● Цифры на 10.11 сходятся с планом. Не хватает явной проверки возврата без даты — добавлю тест.
+
+● Update(tests/test_report.py)
+  ⎿  Added 18 lines
+   133           self.assertEqual(built.contracts[0].signed_amount, rub("200.00"))
+   134           self.assertTrue(any("не совпадает" in warning for warning in built.warnings))
+   135   
+   136 +     def test_refund_without_date_is_not_paid(self) -> None:
+   137 +         contract = report.Contract("D", "Подрядчик", rub("100.00"), date(2026, 1, 1))
+   138 +         work = report.Work("W-1", "D", "работа", rub("100.00"), "done", date(2026, 2, 1), None)
+   139 +         payment = report.Payment(
+   140 +             "P-1",
+   141 +             "D",
+   142 +             None,
+   143 +             rub("50.00"),
+   144 +             "refunded",
+     … +11 lines (ctrl+o to expand)
+
+● Bash(python3 -m unittest tests.test_report -v)
+  ⎿  test_cancelled_work_does_not_take_the_pool (tests.test_report.AllocationRules.test_cancelled_work_does_not_take_the_pool) ... ok
+     test_direct_payment_above_price_stays_on_the_work (tests.test_report.AllocationRules.test_direct_payment_above_price_stays_on_the_work) ... ok
+     test_done_works_are_closed_before_planned (tests.test_report.AllocationRules.test_done_works_are_closed_before_planned) ... ok
+     test_foreign_work_is_not_allocated_to_others (tests.test_report.AllocationRules.test_foreign_work_is_not_allocated_to_others) ... ok
+     test_price_mismatch_warns_and_uses_work_prices (tests.test_report.AllocationRules.test_price_mismatch_warns_and_uses_work_prices) ... ok
+     test_refund_without_date_is_not_paid (tests.test_report.AllocationRules.test_refund_without_date_is_not_paid) ... FAIL
+     test_allocation (tests.test_report.AsOfNovember10.test_allocation) ... ok
+     test_contract_totals (tests.test_report.AsOfNovember10.test_contract_totals) ... ok
+     test_invariants_and_decimal (tests.test_report.AsOfNovember10.test_invariants_and_decimal) ... ok
+     test_queued_is_separate (tests.test_report.AsOfNovember10.test_queued_is_separate) ... ok
+     test_refund_is_not_paid (tests.test_report.AsOfNovember10.test_refund_is_not_paid) ... ok
+     test_w23_is_planned_and_p8_is_excluded (tests.test_report.AsOfNovember10.test_w23_is_planned_and_p8_is_excluded) ... ok
+     test_files_roundtrip (tests.test_report.CsvOutput.test_files_roundtrip) ... ok
+     test_later_payment_included_after_its_date (tests.test_report.OtherDates.test_later_payment_included_after_its_date) ... ok
+     test_refund_still_counts_before_return (tests.test_report.OtherDates.test_refund_still_counts_before_return) ... ok
+     
+     ======================================================================
+     FAIL: test_refund_without_date_is_not_paid (tests.test_report.AllocationRules.test_refund_without_date_is_not_paid)
+     ----------------------------------------------------------------------
+     Traceback (most recent call last):
+       File "/home/candidate/Downloads/Skyclo task test/candidate-B/tests/test_report.py", line 150, in test_refund_without_date_is_not_paid
+         self.assertEqual(built.contracts[0].paid, ZERO)
+         ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     AssertionError: Decimal('50.00') != Decimal('0.00')
+     
+     ----------------------------------------------------------------------
+     Ran 15 tests in 0.021s
+     
+     FAILED (failures=1)
+
+● Возврат без `refunded_at` сейчас остаётся в выплаченном. Так нельзя: даты нет, считать его выплаченным опасно. Уберу из paid и добавлю предупреждение.
+
+● Update(report.py)
+  ⎿  Added 6 lines
+   283           if payment.contract_id not in contracts_by_id:
+   284               warnings.append(
+   285                   f"Платёж {payment.payment_id} ссылается на неизвестный договор "
+   286                   f"{payment.contract_id}."
+   287               )
+   288 +         if payment.status == "refunded" and payment.refunded_at is None:
+   289 +             warnings.append(
+   290 +                 f"У платежа {payment.payment_id} статус возврата, но нет даты возврата. "
+   291 +                 f"В выплаченное не включаю."
+   292 +             )
+   293 +             continue
+   294           if payment_is_refunded(payment, as_of):
+   295               continue
+
+● Дописываю решения и записку бухгалтеру, затем ещё раз прогоню тесты и отчёт.
+
+● Write(DECISIONS.md)
+  ⎿  Wrote 9 lines to DECISIONS.md
+     # Решения
+     
+     **Дата отчёта.** Колонка `status` — состояние на момент выгрузки, а отчёт нужен на дату. Варианты: верить `status` или собрать состояние по датам. Выбрал даты. Работа отменена, если `cancelled_at` не позже даты отчёта, иначе принята, если к этой дате есть `completed_at`, иначе запланирована. Платёж ещё не существует, если `created_at` позже даты. Договор с подписью позже даты остаётся в отчёте, но про него есть предупреждение. На 10.11.2026 упаковка (W-23) запланирована: приёмка 11.11. Платёж P-8 от 12.11 в отчёт не входит, по D-2 выплачено 75 000, остаток 15 000. Если взять выгрузку целиком, W-23 станет принятой, выплачено по D-2 будет 95 000, остаток −5 000, неразнесённый аванс 5 000.
+     
+     **Очередь.** Варианты: считать `queued` выплаченным или нет. Не считаю: деньги ещё не ушли. Сумма видна в колонке «в очереди». Платёж со статусом `paid`, но без `paid_at` к дате отчёта, тоже попадает туда. На 10.11 это P-4, 150 000 по D-1. Если включить его в выплаченное, по D-1 будет выплачено 465 000 и остаток 35 000.
+     
+     **Возврат.** Варианты: оставить платёж в выплаченном или убрать с даты возврата. Убираю, когда `refunded_at` не позже даты отчёта: в этот день деньги уже вернулись. Пока возврата не было (`refunded_at` позже даты), платёж ещё выплачен. Если даты возврата нет, в выплаченное не входит и пишется предупреждение. На 10.11 P-2 (50 000, возврат 10.09) равен нулю. Если оставить его в выплаченном, по D-1 будет 365 000 и остаток 135 000.
+     
+     **Разнесение аванса.** Платёж с указанной работой садится на неё целиком, даже если выходит за цену. Остальной пул (платежи без работы) закрывает сначала принятые работы по дате приёмки, затем запланированные по идентификатору. Отменённые работы в пул не встают и в «к оплате» не входят. Чужую работу платёж не закрывает: сумма остаётся на договоре плательщика и уходит в его пул, плюс предупреждение. Если сумма работ не совпадает с суммой по подписи, в расчёте использую цены работ и пишу предупреждение.
+
+● Write(записка-бухгалтеру.md)
+  ⎿  Wrote 9 lines to записка-бухгалтеру.md
+     Отчёт на 10.11.2026 — два файла: работы и итог по договорам.
+     
+     В файле работ по каждой строке цена, сколько уже выплачено и сколько осталось. «Из них по работе» — платёж, где вы указали работу: так закрыты 15 000 за осеннюю съёмку. «Из них из аванса» — общие платежи по договору, которые я разложил на работы.
+     
+     В файле договоров «к оплате» — сумма работ без отменённых. «Выплачено» — деньги, которые к этой дате уже ушли и не возвращены. «В очереди» в выплаченное не входит. «Осталось» — это «к оплате» минус «выплачено».
+     
+     Аванс без работы я закрываю сначала на принятые работы по дате приёмки, остаток на запланированные по номеру. Поэтому 15 000 по студии сели на зимнюю съёмку, а 25 000 по дизайнеру — на упаковку. Это порядок работ, не ваша пометка.
+     
+     Проверьте, пожалуйста: очередь 150 000 (платёж P-4) правильно не считать выплаченной; съёмку аксессуаров не включать в долг, она отменена; на 10.11 упаковка ещё не принята, приёмка 11.11; платёж 20 000 от 12.11 в этот отчёт не входит. Если хвост аванса нельзя относить на следующую плановую работу, напишите — оставлю его одной суммой на договоре.
+
+● Bash(python3 -m unittest tests.test_report -v && python3 report.py --data data --date 2026-11-10 --out out)
+  ⎿  test_cancelled_work_does_not_take_the_pool (tests.test_report.AllocationRules.test_cancelled_work_does_not_take_the_pool) ... ok
+     test_direct_payment_above_price_stays_on_the_work (tests.test_report.AllocationRules.test_direct_payment_above_price_stays_on_the_work) ... ok
+     test_done_works_are_closed_before_planned (tests.test_report.AllocationRules.test_done_works_are_closed_before_planned) ... ok
+     test_foreign_work_is_not_allocated_to_others (tests.test_report.AllocationRules.test_foreign_work_is_not_allocated_to_others) ... ok
+     test_price_mismatch_warns_and_uses_work_prices (tests.test_report.AllocationRules.test_price_mismatch_warns_and_uses_work_prices) ... ok
+     test_refund_without_date_is_not_paid (tests.test_report.AllocationRules.test_refund_without_date_is_not_paid) ... ok
+     test_allocation (tests.test_report.AsOfNovember10.test_allocation) ... ok
+     test_contract_totals (tests.test_report.AsOfNovember10.test_contract_totals) ... ok
+     test_invariants_and_decimal (tests.test_report.AsOfNovember10.test_invariants_and_decimal) ... ok
+     test_queued_is_separate (tests.test_report.AsOfNovember10.test_queued_is_separate) ... ok
+     test_refund_is_not_paid (tests.test_report.AsOfNovember10.test_refund_is_not_paid) ... ok
+     test_w23_is_planned_and_p8_is_excluded (tests.test_report.AsOfNovember10.test_w23_is_planned_and_p8_is_excluded) ... ok
+     test_files_roundtrip (tests.test_report.CsvOutput.test_files_roundtrip) ... ok
+     test_later_payment_included_after_its_date (tests.test_report.OtherDates.test_later_payment_included_after_its_date) ... ok
+     test_refund_still_counts_before_return (tests.test_report.OtherDates.test_refund_still_counts_before_return) ... ok
+     ----------------------------------------------------------------------
+     Ran 15 tests in 0.019s
+     OK
+     out/works-2026-11-10.csv
+     out/contracts-2026-11-10.csv
+
+● Отчёт на 10.11.2026 считается так: по D-1 выплачено 315 000, остаток 185 000, в очереди 150 000; по D-2 выплачено 75 000, остаток 15 000. Упаковка на эту дату ещё запланирована, платёж от 12.11 в отчёт не входит.
+
+  python3 report.py --data data --date 2026-11-10 --out out
+
+  Файлы: out/works-2026-11-10.csv, out/contracts-2026-11-10.csv. 15 тестов проходят. Решения — в DECISIONS.md, записка — в записка-бухгалтеру.md.
